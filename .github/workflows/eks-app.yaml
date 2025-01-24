@@ -66,20 +66,41 @@ jobs:
     needs: ci
     
     steps:
-    - uses: actions/checkout@v4
-      with:
-        repository: ${{ secrets.G_USER }}/${{ secrets.G_REPOSITORY }}
-        ref: main
-        token: ${{ secrets.G_TOKEN }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-    - name: Set up Image
-      run: |
-        sed -i "s%image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_REPOSITORY }}:[a-zA-Z0-9]*%image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_REPOSITORY }}:${{ github.sha }}%" ./manifest/eks-app.yaml
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
 
-    - name: Commit and push changes
-      run: |
-        git config --local user.email "${{ secrets.G_USER_EMAIL }}"
-        git config --local user.name "${{ secrets.G_USER }}"
-        git add .
-        git commit -m "Update application image version for ArgoCD"
-        git push
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          
+      - name: Update application image version for ArgoCD
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.G_USER }}/${{ secrets.G_REPOSITORY }}
+          ref: main
+          token: ${{ secrets.G_TOKEN }}
+  
+      - name: Set up Image
+        run: |
+          sed -i "s%image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_REPOSITORY }}:[a-zA-Z0-9]*%image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.DOCKERHUB_REPOSITORY }}:${{ github.sha }}%" ./manifest/eks-app.yaml
+  
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "${{ secrets.G_USER_EMAIL }}"
+          git config --local user.name "${{ secrets.G_USER }}"
+          git add .
+          git commit -m "Update application image version for ArgoCD"
+          git push
